@@ -2,6 +2,7 @@ version: "3.8"
 
 services:
   # PostgreSQL 主数据库服务（应用使用）
+  # 应用通过服务名 main_postgres 连接，不使用 postgres 别名
   main_postgres:
     image: postgres:16
     container_name: news-postgres
@@ -21,13 +22,10 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      news-network:
-        # 主库在应用网络中使用别名 postgres
-        aliases:
-          - postgres
+      - news-network
 
   # 测试数据库服务
-  # 在测试网络中使用别名 postgres，确保测试时 host=postgres 指向测试库
+  # 使用别名 postgres，确保测试时 host=postgres 唯一指向测试库
   test_postgres:
     image: postgres:16
     container_name: news-test-postgres
@@ -46,11 +44,7 @@ services:
       retries: 5
     networks:
       news-network:
-        # 测试库也在同一网络，但使用不同服务名
-        aliases:
-          - test_postgres
-      test-network:
-        # 在测试网络中，测试库使用别名 postgres
+        # 在网络中使用别名 postgres，使 host=postgres 唯一指向测试库
         aliases:
           - postgres
 
@@ -67,7 +61,6 @@ services:
       retries: 5
     networks:
       - news-network
-      - test-network
 
   # FastAPI 应用服务
   api:
@@ -76,10 +69,10 @@ services:
       dockerfile: Dockerfile
     container_name: news-api
     environment:
-      # 应用连接主库（通过 postgres 别名）
-      DATABASE_URL: postgresql://news:news@postgres:5432/news
+      # 应用连接主库，使用服务名 main_postgres（不是 postgres 别名）
+      DATABASE_URL: postgresql://news:news@main_postgres:5432/news
       REDIS_URL: redis://redis:6379/0
-      # 测试连接串使用 host=postgres，在 test-network 中指向测试库
+      # 测试连接串使用 host=postgres，唯一指向 test_postgres 服务
       TEST_DATABASE_URL: postgresql://test:test@postgres:5432/test
       DEBUG: "true"
     ports:
@@ -95,15 +88,10 @@ services:
         condition: service_healthy
     networks:
       - news-network
-      - test-network
 
 volumes:
   postgres_data:
 
 networks:
-  # 应用网络：postgres 别名指向主库
   news-network:
-    driver: bridge
-  # 测试网络：postgres 别名指向测试库
-  test-network:
     driver: bridge
