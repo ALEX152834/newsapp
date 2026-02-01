@@ -1,7 +1,7 @@
 # Makefile for News APP Backend
 # 提供一键命令用于开发、测试和部署
 
-.PHONY: up down test lint fmt migrate seed help
+.PHONY: up down test smoke-test lint fmt migrate seed help
 
 # Docker Compose 文件路径
 COMPOSE_FILE := infra/docker-compose.yml
@@ -28,9 +28,17 @@ down:
 	docker compose -f $(COMPOSE_FILE) down
 
 # 运行测试
-# 显式注入 TEST_DATABASE_URL 确保连接到 test_postgres 测试库
+# 显式注入 TEST_DATABASE_URL 确保连接到测试库（通过 test-network 中的 postgres 别名）
+# host=postgres 在 test-network 中解析为 test_postgres 服务
 test:
-	docker compose -f $(COMPOSE_FILE) run --rm -e TEST_DATABASE_URL=postgresql://test:test@test_postgres:5432/test api pytest -q
+	docker compose -f $(COMPOSE_FILE) run --rm --network infra_test-network -e TEST_DATABASE_URL=postgresql://test:test@postgres:5432/test api pytest -q
+
+# Smoke test: 验证测试环境连接正确
+# 显式使用 host=postgres 连接，验证 current_database() = 'test'
+smoke-test:
+	@echo "Running smoke test: verifying test database connection..."
+	docker compose -f $(COMPOSE_FILE) run --rm --network infra_test-network -e TEST_DATABASE_URL=postgresql://test:test@postgres:5432/test api pytest backend/tests/test_smoke.py -v
+	@echo "✓ Smoke test passed: connected to test database via host=postgres"
 
 # 代码检查
 lint:

@@ -22,12 +22,12 @@ from app.main import app
 # 测试数据库配置
 # ============================================================
 
-# 测试数据库连接串 - 使用 compose 服务名 test_postgres
-# 在 docker-compose 网络内，服务间通过服务名互相访问
-# 默认值必须指向测试库 test_postgres，禁止误连主库 postgres
+# 测试数据库连接串 - 使用 host=postgres
+# 在 docker-compose test-network 中，postgres 别名指向 test_postgres 服务
+# 这确保测试使用统一的 host=postgres 约定，同时连接到正确的测试库
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql://test:test@test_postgres:5432/test"
+    "postgresql://test:test@postgres:5432/test"
 )
 
 # ============================================================
