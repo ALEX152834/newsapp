@@ -461,3 +461,191 @@ class TestCursorValidation:
         
         data = response.json()
         assert data["error"]["code"] == "INVALID_CURSOR"
+
+
+class TestCursorStrictValidation:
+    """
+    cursor 严格校验测试类
+    
+    验证 cursor 必须满足 URL-safe base64 字符集要求：
+    - 仅允许 A-Z a-z 0-9 _ - 和最多两个 = padding
+    - 长度必须是 4 的倍数
+    - 不允许标准 base64 字符 + 或 /
+    
+    Requirements: 4.4, 8.3
+    """
+
+    def test_cursor_with_plus_returns_400(self, client: TestClient):
+        """
+        测试 cursor 含 + 时返回 400 + INVALID_CURSOR
+        
+        + 是标准 base64 字符，但不是 URL-safe 字符，必须拒绝。
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        # 使用包含 + 的字符串（标准 base64 字符）
+        response = client.get("/v1/news?cursor=abc+defg")
+        assert response.status_code == 400, \
+            f"cursor 含 + 应返回 400，实际返回 {response.status_code}"
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR", \
+            f"error.code 应为 INVALID_CURSOR，实际为 {data['error']['code']}"
+
+    def test_cursor_with_slash_returns_400(self, client: TestClient):
+        """
+        测试 cursor 含 / 时返回 400 + INVALID_CURSOR
+        
+        / 是标准 base64 字符，但不是 URL-safe 字符，必须拒绝。
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        # 使用包含 / 的字符串（标准 base64 字符）
+        # 注意：/ 在 URL 中需要编码为 %2F
+        response = client.get("/v1/news?cursor=abc%2Fdefg")
+        assert response.status_code == 400, \
+            f"cursor 含 / 应返回 400，实际返回 {response.status_code}"
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR", \
+            f"error.code 应为 INVALID_CURSOR，实际为 {data['error']['code']}"
+
+    def test_cursor_with_dollar_returns_400(self, client: TestClient):
+        """
+        测试 cursor 含 $ 等非 base64 字符时返回 400 + INVALID_CURSOR
+        
+        $ 不是任何 base64 字符集的有效字符，必须拒绝。
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        response = client.get("/v1/news?cursor=abc$defg")
+        assert response.status_code == 400, \
+            f"cursor 含 $ 应返回 400，实际返回 {response.status_code}"
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR", \
+            f"error.code 应为 INVALID_CURSOR，实际为 {data['error']['code']}"
+
+    def test_cursor_length_not_multiple_of_4_returns_400(self, client: TestClient):
+        """
+        测试 cursor 长度非 4 倍数时返回 400 + INVALID_CURSOR
+        
+        例如 cursor=abc（长度 3）必须返回 400。
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        # 长度为 3，不是 4 的倍数
+        response = client.get("/v1/news?cursor=abc")
+        assert response.status_code == 400, \
+            f"cursor 长度非 4 倍数应返回 400，实际返回 {response.status_code}"
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR", \
+            f"error.code 应为 INVALID_CURSOR，实际为 {data['error']['code']}"
+
+    def test_cursor_length_1_returns_400(self, client: TestClient):
+        """
+        测试 cursor 长度为 1 时返回 400
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        response = client.get("/v1/news?cursor=a")
+        assert response.status_code == 400
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR"
+
+    def test_cursor_length_2_returns_400(self, client: TestClient):
+        """
+        测试 cursor 长度为 2 时返回 400
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        response = client.get("/v1/news?cursor=ab")
+        assert response.status_code == 400
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR"
+
+    def test_cursor_length_5_returns_400(self, client: TestClient):
+        """
+        测试 cursor 长度为 5 时返回 400
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        response = client.get("/v1/news?cursor=abcde")
+        assert response.status_code == 400
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR"
+
+    def test_cursor_with_various_invalid_chars_returns_400(self, client: TestClient):
+        """
+        测试 cursor 含各种非法字符时返回 400 + INVALID_CURSOR
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        invalid_chars = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '/', '\\', '|', '<', '>', '?']
+        
+        for char in invalid_chars:
+            # 构造长度为 4 的倍数的字符串
+            cursor = f"abc{char}defg"
+            import urllib.parse
+            encoded_cursor = urllib.parse.quote(cursor, safe='')
+            
+            response = client.get(f"/v1/news?cursor={encoded_cursor}")
+            assert response.status_code == 400, \
+                f"cursor 含 '{char}' 应返回 400，实际返回 {response.status_code}"
+            
+            data = response.json()
+            assert data["error"]["code"] == "INVALID_CURSOR", \
+                f"cursor 含 '{char}' 的 error.code 应为 INVALID_CURSOR，实际为 {data['error']['code']}"
+
+    def test_valid_url_safe_base64_cursor_format(self, client: TestClient):
+        """
+        测试有效的 URL-safe base64 cursor 格式（但内容无效）
+        
+        验证格式正确但内容无效时返回 400 + INVALID_CURSOR（而非 500）。
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        import base64
+        
+        # 创建一个格式正确但内容无效的 cursor
+        # 使用 URL-safe base64 编码
+        invalid_content = "not_valid_format"
+        encoded = base64.urlsafe_b64encode(invalid_content.encode()).decode()
+        
+        response = client.get(f"/v1/news?cursor={encoded}")
+        assert response.status_code == 400, \
+            f"内容无效的 cursor 应返回 400，实际返回 {response.status_code}"
+        
+        data = response.json()
+        assert data["error"]["code"] == "INVALID_CURSOR"
+
+    def test_cursor_with_standard_base64_plus_slash_returns_400(self, client: TestClient):
+        """
+        测试使用标准 base64（含 + 和 /）编码的 cursor 返回 400
+        
+        即使是有效的标准 base64，也必须拒绝，因为只接受 URL-safe base64。
+        
+        Validates: Requirements 4.4, 8.3
+        """
+        import base64
+        
+        # 创建一个会产生 + 或 / 的标准 base64 编码
+        # 使用特定字节序列来确保产生 + 或 /
+        test_bytes = b'\xfb\xff\xfe'  # 这会产生标准 base64 中的 + 或 /
+        standard_b64 = base64.b64encode(test_bytes).decode()
+        
+        # 如果包含 + 或 /，测试应该返回 400
+        if '+' in standard_b64 or '/' in standard_b64:
+            import urllib.parse
+            encoded_cursor = urllib.parse.quote(standard_b64, safe='')
+            
+            response = client.get(f"/v1/news?cursor={encoded_cursor}")
+            assert response.status_code == 400, \
+                f"标准 base64 cursor 应返回 400，实际返回 {response.status_code}"
+            
+            data = response.json()
+            assert data["error"]["code"] == "INVALID_CURSOR"

@@ -22,11 +22,12 @@ from app.main import app
 # 测试数据库配置
 # ============================================================
 
-# 测试数据库连接串 - 使用 compose 服务名 postgres
+# 测试数据库连接串 - 使用 compose 服务名 test_postgres
 # 在 docker-compose 网络内，服务间通过服务名互相访问
+# 默认值必须指向测试库 test_postgres，禁止误连主库 postgres
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql://test:test@postgres:5432/test_news"
+    "postgresql://test:test@test_postgres:5432/test"
 )
 
 # ============================================================
@@ -95,11 +96,35 @@ def engine():
 
 
 @pytest.fixture(scope="session")
-def tables(engine):
+def verify_test_database(engine):
+    """
+    验证连接的是测试数据库，防止误连主库
+    
+    执行 SELECT current_database() 并断言结果必须等于 "test"。
+    如果连接到主库，测试直接失败。
+    """
+    from sqlalchemy import text
+    
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT current_database()"))
+        current_db = result.scalar()
+        
+        assert current_db == "test", (
+            f"FATAL: 测试连接到了错误的数据库！"
+            f"期望连接到 'test'，实际连接到 '{current_db}'。"
+            f"请检查 TEST_DATABASE_URL 配置，确保指向 test_postgres 服务。"
+        )
+        
+        print(f"\n✓ 数据库连接验证通过: current_database() = '{current_db}'")
+
+
+@pytest.fixture(scope="session")
+def tables(engine, verify_test_database):
     """
     创建和清理数据库表（session 级别）
     
     在测试会话开始时创建所有表，结束时删除所有表。
+    依赖 verify_test_database 确保连接到正确的测试库。
     """
     Base.metadata.create_all(engine)
     yield

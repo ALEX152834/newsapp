@@ -28,8 +28,9 @@ down:
 	docker compose -f $(COMPOSE_FILE) down
 
 # 运行测试
+# 显式注入 TEST_DATABASE_URL 确保连接到 test_postgres 测试库
 test:
-	docker compose -f $(COMPOSE_FILE) run --rm api pytest
+	docker compose -f $(COMPOSE_FILE) run --rm -e TEST_DATABASE_URL=postgresql://test:test@test_postgres:5432/test api pytest -q
 
 # 代码检查
 lint:

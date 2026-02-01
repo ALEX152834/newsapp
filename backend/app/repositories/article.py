@@ -109,13 +109,19 @@ class ArticleRepository:
 
     def _parse_cursor(self, cursor: str) -> Tuple[datetime, UUID]:
         """
-        解析游标
+        解析游标（严格校验版本）
         
-        游标格式：urlsafe_base64(published_at_iso|id_uuid)
-        - 编码：URL-safe base64（使用 - 和 _ 替代 + 和 /）
+        游标格式：base64(published_at_iso|id_uuid)
+        - 编码：URL-safe base64（仅允许 A-Z a-z 0-9 _ - 和最多两个 = padding）
         - 分隔符：|
-        - published_at_iso：ISO 8601 UTC 字符串（以 Z 结尾）
+        - published_at_iso：ISO 8601 UTC 字符串（必须以 Z 结尾）
         - id_uuid：UUID 字符串
+        
+        严格校验规则：
+        1. cursor 仅允许 URL-safe base64 字符集：A-Z a-z 0-9 _ -，以及最多两个 = padding
+        2. cursor 长度必须是 4 的倍数（len % 4 == 0）
+        3. 解码使用 base64.b64decode(cursor, altchars=b"-_", validate=True)
+        4. 解码后必须严格为 published_at_iso|id_uuid 两段
         
         示例解码后：2024-01-15T10:30:00Z|123e4567-e89b-12d3-a456-426614174000
         
@@ -132,23 +138,46 @@ class ArticleRepository:
         Raises:
             InvalidCursorError: 当游标格式无效时
         """
+        import re
+        
         try:
-            # 使用 URL-safe base64 解码
-            decoded = base64.urlsafe_b64decode(cursor).decode("utf-8")
+            # 1. 校验 cursor 长度必须是 4 的倍数
+            if len(cursor) == 0 or len(cursor) % 4 != 0:
+                raise InvalidCursorError("Invalid cursor: length must be multiple of 4")
+            
+            # 2. 校验 cursor 仅包含 URL-safe base64 字符集
+            # 允许：A-Z a-z 0-9 _ - 和最多两个 = padding（只能在末尾）
+            url_safe_pattern = r'^[A-Za-z0-9_-]*={0,2}$'
+            if not re.match(url_safe_pattern, cursor):
+                raise InvalidCursorError("Invalid cursor: contains invalid characters")
+            
+            # 3. 检查是否包含标准 base64 字符（+ 或 /），这些不允许
+            if '+' in cursor or '/' in cursor:
+                raise InvalidCursorError("Invalid cursor: contains + or / characters")
+            
+            # 4. 使用严格校验解码：base64.b64decode with validate=True
+            # altchars=b"-_" 将 URL-safe 的 - 和 _ 映射回标准 base64 的 + 和 /
+            decoded_bytes = base64.b64decode(cursor, altchars=b"-_", validate=True)
+            decoded = decoded_bytes.decode("utf-8")
+            
+            # 5. 解码后必须严格为两段
             parts = decoded.split("|")
             if len(parts) != 2:
                 raise InvalidCursorError("Invalid cursor format: expected 2 parts")
             
             published_at_str, id_str = parts
             
-            # 校验时间格式必须以 Z 结尾
+            # 6. 校验时间格式必须以 Z 结尾
             if not published_at_str.endswith("Z"):
                 raise InvalidCursorError("Invalid cursor format: timestamp must end with Z")
             
-            # 解析 ISO 8601 UTC 时间（以 Z 结尾）
+            # 7. 解析 ISO 8601 UTC 时间（以 Z 结尾）
             # 将 Z 替换为 +00:00 以便 fromisoformat 解析
             published_at = datetime.fromisoformat(published_at_str.replace("Z", "+00:00"))
+            
+            # 8. 解析 UUID
             cursor_id = UUID(id_str)
+            
             return published_at, cursor_id
         except InvalidCursorError:
             # 重新抛出 InvalidCursorError，不要包装
